@@ -94,6 +94,8 @@ if ! command -v systemctl &>/dev/null; then
   echo -e "${RED}systemctl not found. This script requires systemd.${RESET}"
   exit 1
 fi
+sudo apt-get update
+sudo apt-get upgrade -y
 
 echo -e "${BOLD}${BLUE}Minecraft Server Setup for Ubuntu${RESET}"
 echo "This will install Java, create a Minecraft user & directory, and configure a systemd service."
@@ -140,14 +142,14 @@ while true; do
   fi
 done
 
-echo
-echo -e "${BOLD}Minecraft EULA${RESET}"
-echo "You must accept the Minecraft EULA to run the server."
-echo "See: https://aka.ms/MinecraftEULA"
-if ! prompt_yes_no "Do you accept the Minecraft EULA?" "n"; then
-  echo -e "${RED}You must accept the EULA to continue. Exiting.${RESET}"
-  exit 1
-fi
+#echo
+#echo -e "${BOLD}Minecraft EULA${RESET}"
+#echo "You must accept the Minecraft EULA to run the server."
+#echo "See: https://aka.ms/MinecraftEULA"
+#if ! prompt_yes_no "Do you accept the Minecraft EULA?" "n"; then
+#  echo -e "${RED}You must accept the EULA to continue. Exiting.${RESET}"
+#  exit 1
+#fi
 
 ########################################
 # Summary
