@@ -333,5 +333,6 @@ echo
 echo "Then restart the server:"
 echo "  systemctl restart ${SERVICE_NAME}"
 echo
+IP=$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
 echo -e "${GREEN}You can now try connecting from a Minecraft client to:${RESET}"
-echo -e "  ${BOLD}<your-server-ip>:${PORT}${RESET}"
+echo -e "  ${BOLD}$IP:${PORT}${RESET}"
