@@ -6,7 +6,7 @@ To check your build version, execute `lsb_release -a`
 
 <img width="377" height="133" alt="image" src="https://github.com/user-attachments/assets/e1d4d33b-23c5-411d-b636-7a5339a11c3a" />
 
-`sudo apt install git`
+`sudo apt install git -y`
 
 `cd ~`
 
