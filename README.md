@@ -11,7 +11,7 @@ To check your build version, execute `lsb_release -a`
 
 `wget https://raw.githubusercontent.com/TJP507/Minecraft-Vanilla-Setup/refs/heads/main/Minecraft-Vanilla-Server-Setup.sh`
 
-`chmod +x ./Minecraft-Vanilla-Server-Setup.sh`
+`sudo chmod +x ./Minecraft-Vanilla-Server-Setup.sh`
 
 `sudo ./Minecraft-Vanilla-Server-Setup.sh`
 
