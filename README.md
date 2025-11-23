@@ -16,9 +16,3 @@ To check your build version, execute `lsb_release -a`
 `sudo ./Minecraft-Vanilla-Server-Setup.sh`
 
 Follow the prompts to configure the Minecraft server.
-
-
-
-
-IP=$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
-echo "$IP"
