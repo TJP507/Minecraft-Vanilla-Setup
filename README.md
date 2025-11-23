@@ -9,7 +9,9 @@ To check your build version, execute `lsb_release -a`
 
 `cd ~`
 
-`wget https://raw.githubusercontent.com/TJP507/Minecraft-Vanilla-Setup/refs/heads/main/Minecraft-Vanilla-Server-Setup.sh`
+`git clone https://github.com/TJP507/Minecraft-Vanilla-Setup.git`
+
+`cd ./Minecraft-Vanilla-Setup`
 
 `sudo chmod +x ./Minecraft-Vanilla-Server-Setup.sh`
 
