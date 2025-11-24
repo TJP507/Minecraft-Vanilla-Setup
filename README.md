@@ -10,7 +10,7 @@ To check your build version, execute `lsb_release -a`
 
 `cd ~`
 
-`git clone https://github.com/TJP507/Minecraft-Vanilla-Setup.git`
+`git clone --branch main https://github.com/TJP507/Minecraft-Vanilla-Setup.git`
 
 `cd ./Minecraft-Vanilla-Setup`
 
