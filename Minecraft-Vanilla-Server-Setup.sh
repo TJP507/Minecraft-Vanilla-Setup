@@ -31,6 +31,9 @@ MC_VERSION="1.21.1"
 MC_JAR_NAME="server-${MC_VERSION}.jar"
 MC_JAR_URL="https://piston-data.mojang.com/v1/objects/59353fb40c36d304f2035d51e7d6e6baa98dc05c/server.jar"
 
+# Directory where this script lives (for finding ops.json)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
 ########################################
 # Helper functions
 ########################################
@@ -241,6 +244,26 @@ level-name=world
 gamemode=survival
 difficulty=normal
 EOF
+fi
+
+########################################
+# Import ops.json if present
+########################################
+
+echo -e "${BLUE}=== Checking for ops.json to import ===${RESET}"
+OPS_SRC="${SCRIPT_DIR}/ops.json"
+OPS_DEST="${MC_SERVER_DIR}/ops.json"
+
+if [[ -f "${OPS_SRC}" ]]; then
+  echo "Found ops.json in script directory: ${OPS_SRC}"
+  if prompt_yes_no "Import this ops.json into the server directory?" "y"; then
+    cp "${OPS_SRC}" "${OPS_DEST}"
+    echo "Imported ops.json to ${OPS_DEST}."
+  else
+    echo -e "${YELLOW}Skipping ops.json import. You will need to manually add op users (via /op in the console or by creating ops.json in ${MC_SERVER_DIR}).${RESET}"
+  fi
+else
+  echo -e "${YELLOW}No ops.json found in script directory (${OPS_SRC}). You will need to manually add op users (via /op in the console or by creating ops.json in ${MC_SERVER_DIR}).${RESET}"
 fi
 
 echo -e "${BLUE}=== Setting ownership for ${MC_BASE_DIR} ===${RESET}"
