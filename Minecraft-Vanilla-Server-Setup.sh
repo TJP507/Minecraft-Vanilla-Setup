@@ -11,11 +11,12 @@ GREEN="\e[32m"
 YELLOW="\e[33m"
 RED="\e[31m"
 BLUE="\e[34m"
+CYAN="\e[36m"
 BOLD="\e[1m"
 RESET="\e[0m"
 
 # Error trap
-trap 'echo -e "${RED}An error occurred on line ${LINENO}. Exiting.${RESET}" >&2' ERR
+trap 'echo -e "\n${RED}An error occurred on line ${LINENO}. Exiting.${RESET}" >&2' ERR
 
 # Defaults
 DEF_MC_USER="minecraft"
@@ -35,6 +36,66 @@ MC_JAR_URL="https://piston-data.mojang.com/v1/objects/59353fb40c36d304f2035d51e7
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 ########################################
+# TUI helpers
+########################################
+
+STEP=1
+TOTAL_STEPS=20  # Approximate, some steps are optional
+
+step() {
+  local msg="$1"
+  echo -e "\n${BLUE}┌────────────────────────────────────────────────────────────┐${RESET}"
+  printf   "${BLUE}│${RESET} ${BOLD}[STEP %2d/%2d]${RESET} %-25s${BLUE}│${RESET}\n" "$STEP" "$TOTAL_STEPS" "$msg"
+  echo -e   "${BLUE}└────────────────────────────────────────────────────────────┘${RESET}"
+  STEP=$((STEP + 1))
+}
+
+ok() {
+  local msg="$1"
+  printf "  %b✔%b %s\n" "$GREEN" "$RESET" "$msg"
+}
+
+# Spinner runner: hides stdout, keeps stderr, shows spinner
+run_with_spinner() {
+  local msg="$1"
+  shift
+
+  step "$msg"
+
+  local spinner=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
+  local i=0
+
+  # Start command in background, stdout -> /dev/null
+  "$@" > /dev/null &
+  local cmd_pid=$!
+
+  # Hide cursor if possible
+  tput civis 2>/dev/null || true
+
+  # Spinner loop
+  while kill -0 "$cmd_pid" 2>/dev/null; do
+    printf "\r  %b%s%b %s" "$CYAN" "${spinner[$i]}" "$RESET" "Working..."
+    i=$(( (i + 1) % ${#spinner[@]} ))
+    sleep 0.1
+  done
+
+  # Wait for command to finish & capture exit code
+  wait "$cmd_pid"
+  local rc=$?
+
+  # Restore cursor
+  tput cnorm 2>/dev/null || true
+
+  if [[ $rc -eq 0 ]]; then
+    printf "\r  %b✔%b %s\n" "$GREEN" "$RESET" "${msg} completed.         "
+  else
+    printf "\r  %b✖%b %s (exit code %d)\n" "$RED" "$RESET" "${msg} failed." "$rc"
+  fi
+
+  return "$rc"
+}
+
+########################################
 # Helper functions
 ########################################
 
@@ -42,7 +103,7 @@ prompt_default() {
   local prompt="$1"
   local default="$2"
   local var
-  read -r -p "$prompt [$default]: " var || true
+  read -r -p "  $prompt [$default]: " var || true
   if [[ -z "$var" ]]; then
     echo "$default"
   else
@@ -56,16 +117,16 @@ prompt_yes_no() {
   local answer
   while true; do
     if [[ "$default" == "y" ]]; then
-      read -r -p "$prompt [Y/n]: " answer || true
+      read -r -p "  $prompt [Y/n]: " answer || true
       answer="${answer:-y}"
     else
-      read -r -p "$prompt [y/N]: " answer || true
+      read -r -p "  $prompt [y/N]: " answer || true
       answer="${answer:-n}"
     fi
     case "${answer,,}" in
       y|yes) return 0 ;;
       n|no)  return 1 ;;
-      *) echo "Please answer y or n." ;;
+      *) echo "  Please answer y or n." ;;
     esac
   done
 }
@@ -97,31 +158,39 @@ if ! command -v systemctl &>/dev/null; then
   echo -e "${RED}systemctl not found. This script requires systemd.${RESET}"
   exit 1
 fi
-sudo apt-get update
-sudo apt-get upgrade -y
 
-echo -e "${BOLD}${BLUE}Minecraft Server Setup for Ubuntu${RESET}"
-echo "This will install Java, create a Minecraft user & directory, and configure a systemd service."
+clear
+echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════╗${RESET}"
+echo -e "${BOLD}${BLUE}║      Minecraft Server Setup for Ubuntu       ║${RESET}"
+echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════╝${RESET}"
+echo
+echo "This guided setup will:"
+echo "  • Install Java"
+echo "  • Create a Minecraft user & directories"
+echo "  • Download the server jar"
+echo "  • Create & enable a systemd service"
 echo
 
 ########################################
 # Prompt for config
 ########################################
 
+step "Configuration"
+
 MC_USER="$(prompt_default "Minecraft system user" "$DEF_MC_USER")"
 MC_BASE_DIR="$(prompt_default "Base directory for all Minecraft servers" "$DEF_BASE_DIR")"
-SERVER_NAME="$(prompt_default "Server name (will be directory & service suffix)" "$DEF_SERVER_NAME")"
+SERVER_NAME="$(prompt_default "Server name (directory & service suffix)" "$DEF_SERVER_NAME")"
 
 MC_SERVER_DIR="${MC_BASE_DIR}/${SERVER_NAME}"
 SERVICE_NAME="minecraft-${SERVER_NAME}"
 
-# RAM prompts with validation
+# RAM with validation
 while true; do
   MC_MIN_RAM="$(prompt_default "Minimum RAM for JVM (e.g., 2G, 1024M)" "$DEF_MIN_RAM")"
   if validate_ram "$MC_MIN_RAM"; then
     break
   else
-    echo -e "${YELLOW}Invalid RAM format. Use something like 2G or 2048M.${RESET}"
+    echo -e "  ${YELLOW}Invalid RAM format. Use something like 2G or 2048M.${RESET}"
   fi
 done
 
@@ -130,7 +199,7 @@ while true; do
   if validate_ram "$MC_MAX_RAM"; then
     break
   else
-    echo -e "${YELLOW}Invalid RAM format. Use something like 4G or 4096M.${RESET}"
+    echo -e "  ${YELLOW}Invalid RAM format. Use something like 4G or 4096M.${RESET}"
   fi
 done
 
@@ -141,82 +210,99 @@ while true; do
   if [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT > 0 && PORT < 65536 )); then
     break
   else
-    echo -e "${YELLOW}Invalid port. Must be a number between 1 and 65535.${RESET}"
+    echo -e "  ${YELLOW}Invalid port. Must be a number between 1 and 65535.${RESET}"
   fi
 done
 
-#echo
-#echo -e "${BOLD}Minecraft EULA${RESET}"
-#echo "You must accept the Minecraft EULA to run the server."
-#echo "See: https://aka.ms/MinecraftEULA"
-#if ! prompt_yes_no "Do you accept the Minecraft EULA?" "n"; then
-#  echo -e "${RED}You must accept the EULA to continue. Exiting.${RESET}"
-#  exit 1
-#fi
+ok "Collected configuration values."
 
 ########################################
 # Summary
 ########################################
 
-echo
-echo -e "${BOLD}${BLUE}Summary of configuration:${RESET}"
-echo -e "  Minecraft user:   ${GREEN}${MC_USER}${RESET}"
-echo -e "  Base directory:   ${GREEN}${MC_BASE_DIR}${RESET}"
-echo -e "  Server directory: ${GREEN}${MC_SERVER_DIR}${RESET}"
-echo -e "  Service name:     ${GREEN}${SERVICE_NAME}${RESET}"
-echo -e "  Minecraft version:${GREEN}${MC_VERSION}${RESET}"
-echo -e "  JVM Min RAM:      ${GREEN}${MC_MIN_RAM}${RESET}"
-echo -e "  JVM Max RAM:      ${GREEN}${MC_MAX_RAM}${RESET}"
-echo -e "  MOTD:             ${GREEN}${MOTD}${RESET}"
-echo -e "  Port:             ${GREEN}${PORT}${RESET}"
+step "Review configuration"
+
+echo -e "  ${BOLD}Minecraft configuration:${RESET}"
+echo -e "    User:            ${GREEN}${MC_USER}${RESET}"
+echo -e "    Base directory:  ${GREEN}${MC_BASE_DIR}${RESET}"
+echo -e "    Server dir:      ${GREEN}${MC_SERVER_DIR}${RESET}"
+echo -e "    Service name:    ${GREEN}${SERVICE_NAME}${RESET}"
+echo -e "    Version:         ${GREEN}${MC_VERSION}${RESET}"
+echo -e "    JVM Min RAM:     ${GREEN}${MC_MIN_RAM}${RESET}"
+echo -e "    JVM Max RAM:     ${GREEN}${MC_MAX_RAM}${RESET}"
+echo -e "    MOTD:            ${GREEN}${MOTD}${RESET}"
+echo -e "    Port:            ${GREEN}${PORT}${RESET}"
 echo
 
-if ! prompt_yes_no "Proceed with installation?" "y"; then
-  echo "Aborting by user request."
+if ! prompt_yes_no "Does this look correct? Proceed with installation?" "y"; then
+  echo "  Aborting by user request."
   exit 0
 fi
+ok "Configuration confirmed by user."
 
 ########################################
-# Installation steps
+# System update / dependencies
 ########################################
 
-echo -e "${BLUE}=== Updating package index and installing dependencies ===${RESET}"
-apt-get update -y
-apt-get install -y openjdk-21-jre-headless curl
-
-echo -e "${BLUE}=== Creating minecraft user (if needed) ===${RESET}"
-if id -u "${MC_USER}" >/dev/null 2>&1; then
-  echo "User ${MC_USER} already exists. Using existing user."
+if prompt_yes_no "Run apt-get update/upgrade before installing Java? (Recommended on fresh systems)" "y"; then
+  run_with_spinner "Updating package lists" apt-get update
+  run_with_spinner "Upgrading installed packages" apt-get upgrade -y
+  ok "System packages updated."
 else
-  useradd -r -m -U -d "${MC_BASE_DIR}" -s /bin/bash "${MC_USER}"
-  echo "Created user ${MC_USER}."
+  ok "Skipped apt-get update/upgrade by user choice."
 fi
 
-echo -e "${BLUE}=== Creating server directory at ${MC_SERVER_DIR} ===${RESET}"
-mkdir -p "${MC_SERVER_DIR}"
+run_with_spinner "Installing OpenJDK 21 & curl" apt-get install -y openjdk-21-jre-headless curl
 
-echo -e "${BLUE}=== Downloading Minecraft server jar (v${MC_VERSION}) ===${RESET}"
+########################################
+# Users & directories
+########################################
+
+step "Ensuring minecraft user exists"
+if id -u "${MC_USER}" >/dev/null 2>&1; then
+  ok "User ${GREEN}${MC_USER}${RESET} already exists. Using existing user."
+else
+  run_with_spinner "Creating user ${MC_USER}" \
+    useradd -r -m -U -d "${MC_BASE_DIR}" -s /bin/bash "${MC_USER}"
+fi
+
+step "Creating server directory"
+mkdir -p "${MC_SERVER_DIR}"
+ok "Using server directory: ${GREEN}${MC_SERVER_DIR}${RESET}"
+
+########################################
+# Download server jar
+########################################
+
+step "Downloading Minecraft server jar (v${MC_VERSION})"
 if [[ -f "${MC_SERVER_DIR}/${MC_JAR_NAME}" ]]; then
-  echo "Jar already exists at ${MC_SERVER_DIR}/${MC_JAR_NAME}."
+  echo "  Jar already exists at ${MC_SERVER_DIR}/${MC_JAR_NAME}."
   if prompt_yes_no "Re-download and overwrite existing jar?" "n"; then
-    curl -fL "${MC_JAR_URL}" -o "${MC_SERVER_DIR}/${MC_JAR_NAME}"
+    run_with_spinner "Re-downloading server jar" \
+      curl -fsSL "${MC_JAR_URL}" -o "${MC_SERVER_DIR}/${MC_JAR_NAME}"
   else
-    echo "Keeping existing jar."
+    ok "Keeping existing server jar."
   fi
 else
-  curl -fL "${MC_JAR_URL}" -o "${MC_SERVER_DIR}/${MC_JAR_NAME}"
+  run_with_spinner "Downloading server jar" \
+    curl -fsSL "${MC_JAR_URL}" -o "${MC_SERVER_DIR}/${MC_JAR_NAME}"
 fi
 
-echo -e "${BLUE}=== Writing EULA file ===${RESET}"
+########################################
+# EULA & server.properties
+########################################
+
+step "Writing EULA file"
 cat > "${MC_SERVER_DIR}/eula.txt" <<EOF
 # Generated by setup script. By setting eula=true you indicate your agreement to the Minecraft EULA:
 # https://aka.ms/MinecraftEULA
 eula=true
 EOF
+ok "EULA accepted in ${MC_SERVER_DIR}/eula.txt"
 
-echo -e "${BLUE}=== Creating server.properties (if it does not already exist) ===${RESET}"
+step "Creating server.properties (if needed)"
 if [[ -f "${MC_SERVER_DIR}/server.properties" ]]; then
-  echo "server.properties already exists."
+  echo "  server.properties already exists."
   if prompt_yes_no "Overwrite existing server.properties with a basic template?" "n"; then
     cat > "${MC_SERVER_DIR}/server.properties" <<EOF
 # Basic generated config - edit to taste.
@@ -229,8 +315,9 @@ level-name=world
 gamemode=survival
 difficulty=normal
 EOF
+    ok "server.properties overwritten with basic template."
   else
-    echo "Keeping existing server.properties."
+    ok "Keeping existing server.properties."
   fi
 else
   cat > "${MC_SERVER_DIR}/server.properties" <<EOF
@@ -244,61 +331,42 @@ level-name=world
 gamemode=survival
 difficulty=normal
 EOF
+  ok "server.properties created with basic template."
 fi
 
 ########################################
 # Import ops.json if present
 ########################################
 
-echo -e "${BLUE}=== Checking for ops.json to import ===${RESET}"
+step "Checking for ops.json to import"
 OPS_SRC="${SCRIPT_DIR}/ops.json"
 OPS_DEST="${MC_SERVER_DIR}/ops.json"
 
 if [[ -f "${OPS_SRC}" ]]; then
-  echo "Found ops.json in script directory: ${OPS_SRC}"
+  echo "  Found ops.json in script directory: ${OPS_SRC}"
   if prompt_yes_no "Import this ops.json into the server directory?" "y"; then
     cp "${OPS_SRC}" "${OPS_DEST}"
-    echo "Imported ops.json to ${OPS_DEST}."
+    ok "Imported ops.json to ${OPS_DEST}."
   else
-    echo -e "${YELLOW}Skipping ops.json import. You will need to manually add op users (via /op in the console or by creating ops.json in ${MC_SERVER_DIR}).${RESET}"
+    ok "Skipped ops.json import (user choice)."
   fi
 else
-  echo -e "${YELLOW}No ops.json found in script directory (${OPS_SRC}). You will need to manually add op users (via /op in the console or by creating ops.json in ${MC_SERVER_DIR}).${RESET}"
+  echo -e "  ${YELLOW}No ops.json found in script directory (${OPS_SRC}).${RESET}"
+  ok "No ops.json imported (none found)."
 fi
 
-echo -e "${BLUE}=== Setting ownership for ${MC_BASE_DIR} ===${RESET}"
-chown -R "${MC_USER}:${MC_USER}" "${MC_BASE_DIR}"
+########################################
+# Permissions & systemd service
+########################################
 
-echo -e "${BLUE}=== Creating systemd service: ${SERVICE_NAME} ===${RESET}"
+step "Setting ownership on ${MC_BASE_DIR}"
+chown -R "${MC_USER}:${MC_USER}" "${MC_BASE_DIR}"
+ok "Ownership set to ${MC_USER}:${MC_USER} for ${MC_BASE_DIR}."
+
+step "Creating systemd service: ${SERVICE_NAME}"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-if [[ -f "${SERVICE_FILE}" ]]; then
-  echo "Service file ${SERVICE_FILE} already exists."
-  if ! prompt_yes_no "Overwrite existing service file?" "n"; then
-    echo "Not overwriting service file. Skipping service creation."
-  else
-    cat > "${SERVICE_FILE}" <<EOF
-[Unit]
-Description=Minecraft Server instance: ${SERVER_NAME}
-After=network.target
-
-[Service]
-WorkingDirectory=${MC_SERVER_DIR}
-User=${MC_USER}
-Group=${MC_USER}
-Restart=always
-RestartSec=10
-Nice=1
-
-ExecStart=/usr/bin/java -Xms${MC_MIN_RAM} -Xmx${MC_MAX_RAM} -jar ${MC_JAR_NAME} nogui
-
-TimeoutStopSec=60
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  fi
-else
+create_service_file() {
   cat > "${SERVICE_FILE}" <<EOF
 [Unit]
 Description=Minecraft Server instance: ${SERVER_NAME}
@@ -319,45 +387,81 @@ TimeoutStopSec=60
 [Install]
 WantedBy=multi-user.target
 EOF
+}
+
+if [[ -f "${SERVICE_FILE}" ]]; then
+  echo "  Service file ${SERVICE_FILE} already exists."
+  if prompt_yes_no "Overwrite existing service file?" "n"; then
+    ok "Keeping existing service file (no changes made)."
+  else
+    create_service_file
+    ok "Service file updated at ${SERVICE_FILE}."
+  fi
+else
+  create_service_file
+  ok "Service file created at ${SERVICE_FILE}."
 fi
 
-echo -e "${BLUE}=== Reloading systemd and enabling service ===${RESET}"
+step "Reloading systemd and enabling service"
 systemctl daemon-reload
 systemctl enable --now "${SERVICE_NAME}.service"
+ok "Service ${SERVICE_NAME} enabled and started."
 
 ########################################
 # Optional UFW rule
 ########################################
 
 if command -v ufw &>/dev/null; then
-  echo
-  echo -e "${BLUE}=== Firewall (UFW) configuration ===${RESET}"
-  if prompt_yes_no "Attempt to open TCP port ${PORT} in UFW?" "y"; then
-    ufw allow "${PORT}"/tcp || echo -e "${YELLOW}Warning: Failed to modify UFW. You may need to adjust firewall rules manually.${RESET}"
+  step "Firewall (UFW) configuration"
+  if prompt_yes_no "Open TCP port ${PORT} in UFW?" "y"; then
+    if ufw allow "${PORT}"/tcp; then
+      ok "UFW rule added to allow TCP port ${PORT}."
+    else
+      echo -e "  ${YELLOW}Warning: Failed to modify UFW. Check firewall rules manually.${RESET}"
+    fi
+  else
+    ok "Skipped UFW changes (user choice)."
   fi
+else
+  step "Firewall (UFW) configuration"
+  ok "UFW not installed; skipping firewall configuration."
 fi
 
 ########################################
 # Done
 ########################################
 
+step "Setup complete"
+
+echo -e "${GREEN}╔══════════════════════════════════════════════╗${RESET}"
+echo -e "${GREEN}║       Minecraft server setup complete!       ║${RESET}"
+echo -e "${GREEN}╚══════════════════════════════════════════════╝${RESET}"
 echo
-echo -e "${GREEN}=== Setup complete! ===${RESET}"
-echo -e "Service name: ${BOLD}${SERVICE_NAME}${RESET}"
-echo -e "Server dir:   ${BOLD}${MC_SERVER_DIR}${RESET}"
+ok "Minecraft service configured."
+
+echo -e "  Service name: ${BOLD}${SERVICE_NAME}${RESET}"
+echo -e "  Server dir:   ${BOLD}${MC_SERVER_DIR}${RESET}"
+echo -e "  Version:      ${BOLD}${MC_VERSION}${RESET}"
 echo
-echo "Useful commands:"
-echo "  systemctl status ${SERVICE_NAME}"
-echo "  journalctl -u ${SERVICE_NAME} -f"
-echo "  systemctl stop ${SERVICE_NAME}"
-echo "  systemctl start ${SERVICE_NAME}"
+echo "  Useful commands:"
+echo "    Check ${SERVICE_NAME} status :: systemctl status ${SERVICE_NAME}"
+echo "    Watch ${SERVICE_NAME} logs   :: journalctl -u ${SERVICE_NAME} -f"
+echo "    Stop ${SERVICE_NAME}         :: systemctl stop ${SERVICE_NAME}"
+echo "    Start ${SERVICE_NAME}        :: systemctl start ${SERVICE_NAME}"
+echo "    Restart ${SERVICE_NAME}      :: systemctl restart ${SERVICE_NAME}"
 echo
-echo "If you need to adjust server settings, edit:"
-echo "  ${MC_SERVER_DIR}/server.properties"
+echo "  ${BOLD}To adjust server settings, edit:${RESET}"
+echo "    ${MC_SERVER_DIR}/server.properties"
 echo
-echo "Then restart the server:"
-echo "  systemctl restart ${SERVICE_NAME}"
+IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
+if [[ -n "${IP:-}" ]]; then
+  ok "Server IP detected."
+  echo -e "  ${BOLD}${GREEN}Connect from Minecraft client using:${RESET}"
+  echo -e "    ${BOLD}${IP}:${PORT}${RESET}"
+else
+  echo -e "  ${BOLD}${YELLOW}Could not automatically detect server IP.${RESET}"
+  echo -e "  Use your server's IP with port ${PORT}."
+fi
+
 echo
-IP=$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
-echo -e "${GREEN}You can now try connecting from a Minecraft client to:${RESET}"
-echo -e "  ${BOLD}$IP:${PORT}${RESET}"
+echo
