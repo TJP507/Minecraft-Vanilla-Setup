@@ -11,6 +11,7 @@ GREEN="\e[32m"
 YELLOW="\e[33m"
 RED="\e[31m"
 BLUE="\e[34m"
+CYAN="\e[36m"
 BOLD="\e[1m"
 RESET="\e[0m"
 
@@ -35,26 +36,58 @@ MC_JAR_URL="https://piston-data.mojang.com/v1/objects/59353fb40c36d304f2035d51e7
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 ########################################
-# "GUI-ish" step helper
+# TUI helpers
 ########################################
 
 STEP=1
+TOTAL_STEPS=12  # Approximate, some steps are optional
+
 step() {
   local msg="$1"
-  echo -e "\n${BLUE}[STEP ${STEP}]${RESET} ${BOLD}${msg}${RESET}"
+  echo -e "\n${BLUE}┌──────────────────────────────────────────────┐${RESET}"
+  printf   "${BLUE}│${RESET} ${BOLD}[STEP %2d/%2d]${RESET} %-25s${BLUE}│${RESET}\n" "$STEP" "$TOTAL_STEPS" "$msg"
+  echo -e   "${BLUE}└──────────────────────────────────────────────┘${RESET}"
   STEP=$((STEP + 1))
 }
 
-# Run a command quietly (hide stdout, show stderr on error)
-run_quiet() {
-  # usage: run_quiet <description> <command> [args...]
+# Spinner runner: hides stdout, keeps stderr, shows spinner
+run_with_spinner() {
   local msg="$1"
   shift
+
   step "$msg"
-  # show a tiny hint while running
-  echo -e "  ${YELLOW}Working... please wait.${RESET}"
-  "$@" > /dev/null
-  echo -e "  ${GREEN}Done.${RESET}"
+
+  local spinner=( '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏' )
+  local i=0
+
+  # Start command in background, stdout -> /dev/null
+  "$@" > /dev/null &
+  local cmd_pid=$!
+
+  # Hide cursor if possible
+  tput civis 2>/dev/null || true
+
+  # Spinner loop
+  while kill -0 "$cmd_pid" 2>/dev/null; do
+    printf "\r  %b%s%b %s" "$CYAN" "${spinner[$i]}" "$RESET" "Working..."
+    i=$(( (i + 1) % ${#spinner[@]} ))
+    sleep 0.1
+  done
+
+  # Wait for command to finish & capture exit code
+  wait "$cmd_pid"
+  local rc=$?
+
+  # Restore cursor
+  tput cnorm 2>/dev/null || true
+
+  if [[ $rc -eq 0 ]]; then
+    printf "\r  %b✔%b %s\n" "$GREEN" "$RESET" "Done.                  "
+  else
+    printf "\r  %b✖%b %s (exit code %d)\n" "$RED" "$RESET" "Failed." "$rc"
+  fi
+
+  return "$rc"
 }
 
 ########################################
@@ -65,7 +98,7 @@ prompt_default() {
   local prompt="$1"
   local default="$2"
   local var
-  read -r -p "$prompt [$default]: " var || true
+  read -r -p "  $prompt [$default]: " var || true
   if [[ -z "$var" ]]; then
     echo "$default"
   else
@@ -79,16 +112,16 @@ prompt_yes_no() {
   local answer
   while true; do
     if [[ "$default" == "y" ]]; then
-      read -r -p "$prompt [Y/n]: " answer || true
+      read -r -p "  $prompt [Y/n]: " answer || true
       answer="${answer:-y}"
     else
-      read -r -p "$prompt [y/N]: " answer || true
+      read -r -p "  $prompt [y/N]: " answer || true
       answer="${answer:-n}"
     fi
     case "${answer,,}" in
       y|yes) return 0 ;;
       n|no)  return 1 ;;
-      *) echo "Please answer y or n." ;;
+      *) echo "  Please answer y or n." ;;
     esac
   done
 }
@@ -122,11 +155,11 @@ if ! command -v systemctl &>/dev/null; then
 fi
 
 clear
-echo -e "${BOLD}${BLUE}========================================${RESET}"
-echo -e "${BOLD}${BLUE}   Minecraft Server Setup for Ubuntu   ${RESET}"
-echo -e "${BOLD}${BLUE}========================================${RESET}"
+echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════╗${RESET}"
+echo -e "${BOLD}${BLUE}║      Minecraft Server Setup for Ubuntu      ║${RESET}"
+echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════╝${RESET}"
 echo
-echo "This wizard will:"
+echo "This guided setup will:"
 echo "  • Install Java"
 echo "  • Create a Minecraft user & directories"
 echo "  • Download the server jar"
@@ -136,22 +169,23 @@ echo
 ########################################
 # Prompt for config
 ########################################
+
 step "Configuration"
 
 MC_USER="$(prompt_default "Minecraft system user" "$DEF_MC_USER")"
 MC_BASE_DIR="$(prompt_default "Base directory for all Minecraft servers" "$DEF_BASE_DIR")"
-SERVER_NAME="$(prompt_default "Server name (will be directory & service suffix)" "$DEF_SERVER_NAME")"
+SERVER_NAME="$(prompt_default "Server name (directory & service suffix)" "$DEF_SERVER_NAME")"
 
 MC_SERVER_DIR="${MC_BASE_DIR}/${SERVER_NAME}"
 SERVICE_NAME="minecraft-${SERVER_NAME}"
 
-# RAM prompts with validation
+# RAM with validation
 while true; do
   MC_MIN_RAM="$(prompt_default "Minimum RAM for JVM (e.g., 2G, 1024M)" "$DEF_MIN_RAM")"
   if validate_ram "$MC_MIN_RAM"; then
     break
   else
-    echo -e "${YELLOW}Invalid RAM format. Use something like 2G or 2048M.${RESET}"
+    echo -e "  ${YELLOW}Invalid RAM format. Use something like 2G or 2048M.${RESET}"
   fi
 done
 
@@ -160,7 +194,7 @@ while true; do
   if validate_ram "$MC_MAX_RAM"; then
     break
   else
-    echo -e "${YELLOW}Invalid RAM format. Use something like 4G or 4096M.${RESET}"
+    echo -e "  ${YELLOW}Invalid RAM format. Use something like 4G or 4096M.${RESET}"
   fi
 done
 
@@ -171,7 +205,7 @@ while true; do
   if [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT > 0 && PORT < 65536 )); then
     break
   else
-    echo -e "${YELLOW}Invalid port. Must be a number between 1 and 65535.${RESET}"
+    echo -e "  ${YELLOW}Invalid port. Must be a number between 1 and 65535.${RESET}"
   fi
 done
 
@@ -181,19 +215,20 @@ done
 
 step "Review configuration"
 
-echo -e "  Minecraft user:   ${GREEN}${MC_USER}${RESET}"
-echo -e "  Base directory:   ${GREEN}${MC_BASE_DIR}${RESET}"
-echo -e "  Server directory: ${GREEN}${MC_SERVER_DIR}${RESET}"
-echo -e "  Service name:     ${GREEN}${SERVICE_NAME}${RESET}"
-echo -e "  Minecraft version:${GREEN}${MC_VERSION}${RESET}"
-echo -e "  JVM Min RAM:      ${GREEN}${MC_MIN_RAM}${RESET}"
-echo -e "  JVM Max RAM:      ${GREEN}${MC_MAX_RAM}${RESET}"
-echo -e "  MOTD:             ${GREEN}${MOTD}${RESET}"
-echo -e "  Port:             ${GREEN}${PORT}${RESET}"
+echo -e "  ${BOLD}Minecraft configuration:${RESET}"
+echo -e "    User:            ${GREEN}${MC_USER}${RESET}"
+echo -e "    Base directory:  ${GREEN}${MC_BASE_DIR}${RESET}"
+echo -e "    Server dir:      ${GREEN}${MC_SERVER_DIR}${RESET}"
+echo -e "    Service name:    ${GREEN}${SERVICE_NAME}${RESET}"
+echo -e "    Version:         ${GREEN}${MC_VERSION}${RESET}"
+echo -e "    JVM Min RAM:     ${GREEN}${MC_MIN_RAM}${RESET}"
+echo -e "    JVM Max RAM:     ${GREEN}${MC_MAX_RAM}${RESET}"
+echo -e "    MOTD:            ${GREEN}${MOTD}${RESET}"
+echo -e "    Port:            ${GREEN}${PORT}${RESET}"
 echo
 
-if ! prompt_yes_no "Proceed with installation?" "y"; then
-  echo "Aborting by user request."
+if ! prompt_yes_no "Does this look correct? Proceed with installation?" "y"; then
+  echo "  Aborting by user request."
   exit 0
 fi
 
@@ -202,11 +237,11 @@ fi
 ########################################
 
 if prompt_yes_no "Run apt-get update/upgrade before installing Java? (Recommended on fresh systems)" "y"; then
-  run_quiet "Updating package lists" apt-get update
-  run_quiet "Upgrading installed packages" apt-get upgrade -y
+  run_with_spinner "Updating package lists" apt-get update
+  run_with_spinner "Upgrading installed packages" apt-get upgrade -y
 fi
 
-run_quiet "Installing OpenJDK 21 & curl" apt-get install -y openjdk-21-jre-headless curl
+run_with_spinner "Installing OpenJDK 21 & curl" apt-get install -y openjdk-21-jre-headless curl
 
 ########################################
 # Users & directories
@@ -216,7 +251,7 @@ step "Ensuring minecraft user exists"
 if id -u "${MC_USER}" >/dev/null 2>&1; then
   echo -e "  User ${GREEN}${MC_USER}${RESET} already exists. Using existing user."
 else
-  run_quiet "Creating user ${MC_USER}" \
+  run_with_spinner "Creating user ${MC_USER}" \
     useradd -r -m -U -d "${MC_BASE_DIR}" -s /bin/bash "${MC_USER}"
 fi
 
@@ -232,14 +267,12 @@ step "Downloading Minecraft server jar (v${MC_VERSION})"
 if [[ -f "${MC_SERVER_DIR}/${MC_JAR_NAME}" ]]; then
   echo "  Jar already exists at ${MC_SERVER_DIR}/${MC_JAR_NAME}."
   if prompt_yes_no "Re-download and overwrite existing jar?" "n"; then
-    curl -fsSL "${MC_JAR_URL}" -o "${MC_SERVER_DIR}/${MC_JAR_NAME}"
-    echo -e "  ${GREEN}Jar re-downloaded.${RESET}"
+    run_with_spinner "Re-downloading server jar" curl -fsSL "${MC_JAR_URL}" -o "${MC_SERVER_DIR}/${MC_JAR_NAME}"
   else
     echo "  Keeping existing jar."
   fi
 else
-  curl -fsSL "${MC_JAR_URL}" -o "${MC_SERVER_DIR}/${MC_JAR_NAME}"
-  echo -e "  ${GREEN}Jar downloaded.${RESET}"
+  run_with_spinner "Downloading server jar" curl -fsSL "${MC_JAR_URL}" -o "${MC_SERVER_DIR}/${MC_JAR_NAME}"
 fi
 
 ########################################
@@ -380,25 +413,28 @@ fi
 
 step "Setup complete"
 
-echo -e "${GREEN}=== Minecraft server setup is complete! ===${RESET}"
+echo -e "${GREEN}╔══════════════════════════════════════════════╗${RESET}"
+echo -e "${GREEN}║       Minecraft server setup complete!       ║${RESET}"
+echo -e "${GREEN}╚══════════════════════════════════════════════╝${RESET}"
 echo
 echo -e "  Service name: ${BOLD}${SERVICE_NAME}${RESET}"
 echo -e "  Server dir:   ${BOLD}${MC_SERVER_DIR}${RESET}"
 echo
-echo "Useful commands:"
-echo "  systemctl status ${SERVICE_NAME}"
-echo "  journalctl -u ${SERVICE_NAME} -f"
-echo "  systemctl stop ${SERVICE_NAME}"
-echo "  systemctl start ${SERVICE_NAME}"
-echo "  systemctl restart ${SERVICE_NAME}"
+echo "  Useful commands:"
+echo "    systemctl status ${SERVICE_NAME}"
+echo "    journalctl -u ${SERVICE_NAME} -f"
+echo "    systemctl stop ${SERVICE_NAME}"
+echo "    systemctl start ${SERVICE_NAME}"
+echo "    systemctl restart ${SERVICE_NAME}"
 echo
-echo "If you need to adjust server settings, edit:"
-echo "  ${MC_SERVER_DIR}/server.properties"
+echo "  To adjust server settings, edit:"
+echo "    ${MC_SERVER_DIR}/server.properties"
 echo
 IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
 if [[ -n "${IP:-}" ]]; then
-  echo -e "${GREEN}You can now try connecting from a Minecraft client to:${RESET}"
-  echo -e "  ${BOLD}${IP}:${PORT}${RESET}"
+  echo -e "  ${GREEN}Connect from Minecraft client using:${RESET}"
+  echo -e "    ${BOLD}${IP}:${PORT}${RESET}"
 else
-  echo -e "${YELLOW}Could not automatically detect the server IP. Use your server's IP with port ${PORT}.${RESET}"
+  echo -e "  ${YELLOW}Could not automatically detect server IP.${RESET}"
+  echo -e "  Use your server's IP with port ${PORT}."
 fi
