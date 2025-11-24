@@ -44,9 +44,9 @@ TOTAL_STEPS=12  # Approximate, some steps are optional
 
 step() {
   local msg="$1"
-  echo -e "\n${BLUE}┌──────────────────────────────────────────────┐${RESET}"
+  echo -e "\n${BLUE}┌────────────────────────────────────────────────────────────┐${RESET}"
   printf   "${BLUE}│${RESET} ${BOLD}[STEP %2d/%2d]${RESET} %-25s${BLUE}│${RESET}\n" "$STEP" "$TOTAL_STEPS" "$msg"
-  echo -e   "${BLUE}└──────────────────────────────────────────────┘${RESET}"
+  echo -e   "${BLUE}└────────────────────────────────────────────────────────────┘${RESET}"
   STEP=$((STEP + 1))
 }
 
@@ -156,7 +156,7 @@ fi
 
 clear
 echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════╗${RESET}"
-echo -e "${BOLD}${BLUE}║      Minecraft Server Setup for Ubuntu      ║${RESET}"
+echo -e "${BOLD}${BLUE}║      Minecraft Server Setup for Ubuntu       ║${RESET}"
 echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════╝${RESET}"
 echo
 echo "This guided setup will:"
@@ -419,22 +419,26 @@ echo -e "${GREEN}╚════════════════════
 echo
 echo -e "  Service name: ${BOLD}${SERVICE_NAME}${RESET}"
 echo -e "  Server dir:   ${BOLD}${MC_SERVER_DIR}${RESET}"
+echo -e "  Version:      ${GREEN}${MC_VERSION}${RESET}"
 echo
 echo "  Useful commands:"
-echo "    systemctl status ${SERVICE_NAME}"
-echo "    journalctl -u ${SERVICE_NAME} -f"
-echo "    systemctl stop ${SERVICE_NAME}"
-echo "    systemctl start ${SERVICE_NAME}"
-echo "    systemctl restart ${SERVICE_NAME}"
+echo "    Check ${SERVICE_NAME} status:: systemctl status ${SERVICE_NAME}"
+echo "    Watch ${SERVICE_NAME} logs  :: journalctl -u ${SERVICE_NAME} -f"
+echo "    Stop ${SERVICE_NAME}        :: systemctl stop ${SERVICE_NAME}"
+echo "    Start ${SERVICE_NAME}       :: systemctl start ${SERVICE_NAME}"
+echo "    Restart ${SERVICE_NAME}     ::systemctl restart ${SERVICE_NAME}"
 echo
 echo "  To adjust server settings, edit:"
 echo "    ${MC_SERVER_DIR}/server.properties"
 echo
 IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
 if [[ -n "${IP:-}" ]]; then
-  echo -e "  ${GREEN}Connect from Minecraft client using:${RESET}"
+  echo -e "  ${BOLD}${GREEN}Connect from Minecraft client using:${RESET}"
   echo -e "    ${BOLD}${IP}:${PORT}${RESET}"
 else
-  echo -e "  ${YELLOW}Could not automatically detect server IP.${RESET}"
+  echo -e "  ${BOLD}${YELLOW}Could not automatically detect server IP.${RESET}"
   echo -e "  Use your server's IP with port ${PORT}."
 fi
+
+echo
+echo
